@@ -1,0 +1,489 @@
+<!doctype html><html lang="de"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mo‘s Abo · Anmeldung einrichten</title><style>body{max-width:950px;margin:35px auto;padding:20px;background:#101114;color:#f7f0e4;font:17px/1.6 system-ui}h1,a{color:#dfbd83}textarea{box-sizing:border-box;width:100%;height:420px;background:#1c1e22;color:white;padding:15px}button{padding:14px;background:#dfbd83;border:0;border-radius:8px;font:inherit}</style><h1>Nach der Anmeldung direkt zu den Angeboten.</h1><p>Die sechs HTML-Dateien dieses Updates im bestehenden GitHub-Hauptverzeichnis hochladen und gleichnamige Dateien ersetzen. Die neue Hauptseite index.html und assets bleiben bestehen.</p><p>Nach bestätigter E-Mail und erfolgreicher Kontoprüfung öffnen die Kundenseiten sofort die Tarife. Member zeigt die Kategorieauswahl. Das kostenlose Konto erzeugt kein bezahltes Guthaben.</p><h2>Datenbankregeln bereitstellen</h2><p>Die mitgelieferte Regelfassung ist vorbereitet und lokal geprüft, aber noch nicht im Liveprojekt veröffentlicht.</p><ol><li><a href="https://console.firebase.google.com/project/mo-fino/firestore/rules" target="_blank" rel="noopener">Firebase-Projekt mo-fino → Firestore → Regeln öffnen</a>.</li><li>Vorher den gesamten dort vorhandenen Regeltext als Sicherung speichern. Bei abweichenden zusätzlichen Live-Regeln diese nicht ungeprüft ersetzen; zuerst mit dieser vorbereiteten Fassung abgleichen.</li><li>Die geprüfte Fassung aus firestore.rules beziehungsweise dem Textfeld unten in den Regel-Editor übernehmen.</li><li>Veröffentlichen drücken. Falls Firebase Fehler anzeigt, den Fehlertext zur Prüfung weitergeben.</li><li>Die Autowäsche-Kundenseite neu laden und erneut anmelden. Eine neue E-Mail-Adresse zuerst bestätigen.</li></ol><p>Admins brauchen weiterhin eine gesonderte Freigabe; eine Firmenregistrierung gewährt keine Adminrechte. Es wurden keine Regeln auf öffentliches Lesen oder Schreiben umgestellt. Die Bereitstellung dieser Regeln aktiviert keine Café-Serverfunktionen; deren Einrichtung bleibt separat.</p><p><button id="copy" type="button">Regeltext kopieren</button> <span id="status"></span></p><textarea id="rules" readonly aria-label="Vorbereitete Firestore-Regeln">rules_version = &#x27;2&#x27;;
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function verified() {
+      return request.auth != null &amp;&amp; request.auth.token.email_verified == true;
+    }
+    function own(uid) { return verified() &amp;&amp; request.auth.uid == uid; }
+    function admin() {
+      return verified()
+        &amp;&amp; get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true;
+    }
+    function audit() {
+      return request.resource.data.updatedAt == request.time
+        &amp;&amp; request.resource.data.updatedBy == request.auth.uid;
+    }
+    function plan(value) { return value in [&#x27;basic&#x27;,&#x27;standard&#x27;,&#x27;premium&#x27;,&#x27;mittag&#x27;,&#x27;cowork&#x27;]; }
+    function cafeId(value) { return value is string &amp;&amp; value.matches(&#x27;^[A-Za-z0-9_-]{1,100}$&#x27;); }
+    function staffValues() {
+      return cafeId(request.resource.data.cafeId)
+        &amp;&amp; request.resource.data.cafeName is string
+        &amp;&amp; request.resource.data.cafeName.size() &gt; 0
+        &amp;&amp; request.resource.data.cafeName.size() &lt;= 120
+        &amp;&amp; request.resource.data.active is bool;
+    }
+    function review() {
+      return request.resource.data.status in [&#x27;approved&#x27;,&#x27;rejected&#x27;]
+        &amp;&amp; request.resource.data.reviewedAt == request.time
+        &amp;&amp; request.resource.data.reviewedBy == request.auth.uid;
+    }
+    match /admins/{uid} {
+      allow get: if own(uid);
+      allow list, create, update, delete: if false;
+    }
+    match /members/{uid} {
+      allow get: if own(uid) || admin();
+      allow list: if admin();
+      allow create: if own(uid)
+        &amp;&amp; request.resource.data.keys().hasAll([&#x27;name&#x27;,&#x27;email&#x27;,&#x27;memberId&#x27;,&#x27;remaining&#x27;,&#x27;active&#x27;,&#x27;createdAt&#x27;])
+        &amp;&amp; request.resource.data.keys().hasOnly([&#x27;name&#x27;,&#x27;email&#x27;,&#x27;memberId&#x27;,&#x27;remaining&#x27;,&#x27;active&#x27;,&#x27;createdAt&#x27;])
+        &amp;&amp; request.resource.data.name is string
+        &amp;&amp; request.resource.data.name.size() &gt; 0 &amp;&amp; request.resource.data.name.size() &lt;= 100
+        &amp;&amp; request.resource.data.email == request.auth.token.email
+        &amp;&amp; request.resource.data.memberId == &#x27;MF-&#x27; + uid
+        &amp;&amp; request.resource.data.remaining is int &amp;&amp; request.resource.data.remaining == 0
+        &amp;&amp; request.resource.data.active == false
+        &amp;&amp; request.resource.data.createdAt == request.time;
+      allow update: if admin()
+        &amp;&amp; request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly([&#x27;plan&#x27;,&#x27;remaining&#x27;,&#x27;active&#x27;,&#x27;updatedAt&#x27;,&#x27;updatedBy&#x27;])
+        &amp;&amp; plan(request.resource.data.plan)
+        &amp;&amp; request.resource.data.remaining is int
+        &amp;&amp; request.resource.data.remaining &gt;= 0 &amp;&amp; request.resource.data.remaining &lt;= 10000
+        &amp;&amp; request.resource.data.active is bool &amp;&amp; audit();
+      allow delete: if false;
+    }
+    match /membershipRequests/{uid} {
+      allow get: if own(uid) || admin();
+      allow list: if admin();
+      allow create: if own(uid)
+        &amp;&amp; request.resource.data.keys().hasOnly([&#x27;plan&#x27;,&#x27;email&#x27;,&#x27;status&#x27;,&#x27;requestedAt&#x27;])
+        &amp;&amp; plan(request.resource.data.plan)
+        &amp;&amp; request.resource.data.email == request.auth.token.email
+        &amp;&amp; request.resource.data.status == &#x27;pending&#x27;
+        &amp;&amp; request.resource.data.requestedAt == request.time;
+      allow update: if (own(uid)
+        &amp;&amp; request.resource.data.diff(resource.data).affectedKeys().hasOnly([&#x27;plan&#x27;,&#x27;email&#x27;,&#x27;status&#x27;,&#x27;requestedAt&#x27;])
+        &amp;&amp; plan(request.resource.data.plan)
+        &amp;&amp; request.resource.data.email == request.auth.token.email
+        &amp;&amp; request.resource.data.status == &#x27;pending&#x27;
+        &amp;&amp; request.resource.data.requestedAt == request.time)
+        || (admin()
+          &amp;&amp; request.resource.data.diff(resource.data).affectedKeys().hasOnly([&#x27;status&#x27;,&#x27;reviewedAt&#x27;,&#x27;reviewedBy&#x27;])
+          &amp;&amp; review()
+          &amp;&amp; resource.data.status == &#x27;pending&#x27;
+          &amp;&amp; (request.resource.data.status == &#x27;rejected&#x27;
+            || (getAfter(/databases/$(database)/documents/members/$(uid)).data.active == true
+              &amp;&amp; getAfter(/databases/$(database)/documents/members/$(uid)).data.plan == resource.data.plan)));
+      allow delete: if false;
+    }
+    match /staff/{uid} {
+      allow get: if own(uid) || admin();
+      allow list: if admin();
+      allow create: if admin() &amp;&amp; staffValues() &amp;&amp; audit()
+        &amp;&amp; request.resource.data.keys().hasOnly([&#x27;cafeId&#x27;,&#x27;cafeName&#x27;,&#x27;active&#x27;,&#x27;updatedAt&#x27;,&#x27;updatedBy&#x27;]);
+      allow update: if admin() &amp;&amp; staffValues() &amp;&amp; audit()
+        &amp;&amp; request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly([&#x27;cafeId&#x27;,&#x27;cafeName&#x27;,&#x27;active&#x27;,&#x27;updatedAt&#x27;,&#x27;updatedBy&#x27;]);
+      allow delete: if false;
+    }
+    match /cafeApplications/{uid} {
+      allow get: if own(uid) || admin();
+      allow list: if admin();
+      allow create: if own(uid)
+        &amp;&amp; request.resource.data.keys().hasOnly([&#x27;cafeName&#x27;,&#x27;address&#x27;,&#x27;email&#x27;,&#x27;status&#x27;,&#x27;createdAt&#x27;,&#x27;partnerAgreementVersion&#x27;,&#x27;partnerAgreementAt&#x27;])
+        &amp;&amp; request.resource.data.partnerAgreementVersion == &#x27;2026-10-19&#x27;
+        &amp;&amp; request.resource.data.partnerAgreementAt == request.time
+        &amp;&amp; request.resource.data.cafeName is string
+        &amp;&amp; request.resource.data.cafeName.size() &gt; 0 &amp;&amp; request.resource.data.cafeName.size() &lt;= 120
+        &amp;&amp; request.resource.data.address is string
+        &amp;&amp; request.resource.data.address.size() &gt; 0 &amp;&amp; request.resource.data.address.size() &lt;= 250
+        &amp;&amp; request.resource.data.email == request.auth.token.email
+        &amp;&amp; request.resource.data.status == &#x27;pending&#x27;
+        &amp;&amp; request.resource.data.createdAt == request.time;
+      allow update: if admin()
+        &amp;&amp; request.resource.data.diff(resource.data).affectedKeys().hasOnly([&#x27;status&#x27;,&#x27;reviewedAt&#x27;,&#x27;reviewedBy&#x27;,&#x27;cafeId&#x27;])
+        &amp;&amp; review()
+        &amp;&amp; resource.data.status == &#x27;pending&#x27;
+        &amp;&amp; (request.resource.data.status == &#x27;rejected&#x27;
+          || (cafeId(request.resource.data.cafeId)
+            &amp;&amp; getAfter(/databases/$(database)/documents/staff/$(uid)).data.active == true
+            &amp;&amp; getAfter(/databases/$(database)/documents/staff/$(uid)).data.cafeId == request.resource.data.cafeId));
+      allow delete: if false;
+    }
+    match /cafes/{id} {
+      allow read: if admin();
+      allow write: if false;
+    }
+    match /redemptions/{id} {
+      allow get, list: if admin() || (verified() &amp;&amp; (resource.data.memberUid == request.auth.uid || resource.data.staffUid == request.auth.uid));
+      allow create, delete: if false;
+      allow update: if admin()
+        &amp;&amp; resource.data.get(&#x27;paymentStatus&#x27;, &#x27;open&#x27;) == &#x27;open&#x27;
+        &amp;&amp; request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly([&#x27;paymentStatus&#x27;,&#x27;paidAt&#x27;,&#x27;paidBy&#x27;,&#x27;paymentReference&#x27;])
+        &amp;&amp; request.resource.data.paymentStatus == &#x27;paid&#x27;
+        &amp;&amp; request.resource.data.paidAt == request.time
+        &amp;&amp; request.resource.data.paidBy == request.auth.uid
+        &amp;&amp; request.resource.data.paymentReference is string
+        &amp;&amp; request.resource.data.paymentReference.size() &gt;= 3
+        &amp;&amp; request.resource.data.paymentReference.size() &lt;= 160;
+    }
+    // Shared structure for carwash, bowling and later services. Existing coffee paths stay intact.
+    match /services/{serviceId} {
+      allow read: if verified();
+      allow create, update: if admin() &amp;&amp; serviceId.matches(&#x27;^[a-z][a-z0-9_-]{1,39}$&#x27;)
+        &amp;&amp; request.resource.data.keys().hasOnly([&#x27;name&#x27;,&#x27;active&#x27;,&#x27;updatedAt&#x27;,&#x27;updatedBy&#x27;])
+        &amp;&amp; request.resource.data.name is string &amp;&amp; request.resource.data.name.size() &gt; 0
+        &amp;&amp; request.resource.data.name.size() &lt;= 80 &amp;&amp; request.resource.data.active is bool &amp;&amp; audit();
+      allow delete: if false;
+      function company(uid) {
+        return verified() &amp;&amp; get(/databases/$(database)/documents/services/$(serviceId)/companies/$(uid)).data.active == true;
+      }
+      function enabled() {
+        return get(/databases/$(database)/documents/services/$(serviceId)).data.active == true;
+      }
+      function subscription(uid) {
+        return get(/databases/$(database)/documents/services/$(serviceId)/subscriptions/$(uid)).data;
+      }
+      function afterSubscription(uid) {
+        return getAfter(/databases/$(database)/documents/services/$(serviceId)/subscriptions/$(uid)).data;
+      }
+      function requestBefore(id) {
+        return get(/databases/$(database)/documents/services/$(serviceId)/requests/$(id)).data;
+      }
+      function requestAfter(id) {
+        return getAfter(/databases/$(database)/documents/services/$(serviceId)/requests/$(id)).data;
+      }
+      function ledgerAfter(id) {
+        return getAfter(/databases/$(database)/documents/services/$(serviceId)/redemptions/$(id)).data;
+      }
+      function usable(s) { return s.active == true &amp;&amp; s.remaining &gt; 0 &amp;&amp; s.validUntil &gt; request.time; }
+      function companyFields(d) {
+        return d.name is string &amp;&amp; d.name.size() &gt; 0 &amp;&amp; d.name.size() &lt;= 120
+          &amp;&amp; d.address is string &amp;&amp; d.address.size() &gt; 0 &amp;&amp; d.address.size() &lt;= 250;
+      }
+      match /companies/{uid} {
+        allow get: if own(uid) || admin();
+        allow list: if admin();
+        allow create: if own(uid) &amp;&amp; companyFields(request.resource.data)
+          &amp;&amp; request.resource.data.partnerAgreementVersion == &#x27;2026-10-19&#x27;
+          &amp;&amp; request.resource.data.partnerAgreementAt == request.time
+          &amp;&amp; request.resource.data.keys().hasOnly([&#x27;name&#x27;,&#x27;address&#x27;,&#x27;email&#x27;,&#x27;status&#x27;,&#x27;active&#x27;,&#x27;createdAt&#x27;,&#x27;partnerAgreementVersion&#x27;,&#x27;partnerAgreementAt&#x27;])
+          &amp;&amp; request.resource.data.email == request.auth.token.email
+          &amp;&amp; request.resource.data.status == &#x27;pending&#x27; &amp;&amp; request.resource.data.active == false
+          &amp;&amp; request.resource.data.createdAt == request.time;
+        allow update: if admin()
+          &amp;&amp; request.resource.data.diff(resource.data).affectedKeys().hasOnly([&#x27;status&#x27;,&#x27;active&#x27;,&#x27;reviewedAt&#x27;,&#x27;reviewedBy&#x27;])
+          &amp;&amp; review() &amp;&amp; request.resource.data.active is bool
+          &amp;&amp; (request.resource.data.status == &#x27;approved&#x27; || request.resource.data.active == false);
+        allow delete: if false;
+      }
+      match /offers/{id} {
+        allow read: if verified() &amp;&amp; (admin() || resource.data.active == true || resource.data.companyId == request.auth.uid);
+        allow create, update: if admin() &amp;&amp; company(request.resource.data.companyId)
+          &amp;&amp; request.resource.data.keys().hasOnly([&#x27;name&#x27;,&#x27;description&#x27;,&#x27;companyId&#x27;,&#x27;companyName&#x27;,&#x27;address&#x27;,&#x27;units&#x27;,&#x27;periodDays&#x27;,&#x27;priceCents&#x27;,&#x27;payoutCents&#x27;,&#x27;active&#x27;,&#x27;updatedAt&#x27;,&#x27;updatedBy&#x27;])
+          &amp;&amp; request.resource.data.name is string &amp;&amp; request.resource.data.name.size() &gt; 0 &amp;&amp; request.resource.data.name.size() &lt;= 100
+          &amp;&amp; request.resource.data.description is string &amp;&amp; request.resource.data.description.size() &lt;= 500
+          &amp;&amp; request.resource.data.companyName is string &amp;&amp; request.resource.data.address is string
+          &amp;&amp; request.resource.data.units is int &amp;&amp; request.resource.data.units &gt;= 1 &amp;&amp; request.resource.data.units &lt;= 1000
+          &amp;&amp; request.resource.data.periodDays is int &amp;&amp; request.resource.data.periodDays &gt;= 1 &amp;&amp; request.resource.data.periodDays &lt;= 366
+          &amp;&amp; request.resource.data.priceCents is int &amp;&amp; request.resource.data.priceCents &gt; 0 &amp;&amp; request.resource.data.priceCents &lt;= 10000000
+          &amp;&amp; request.resource.data.payoutCents is int &amp;&amp; request.resource.data.payoutCents &gt;= 0 &amp;&amp; request.resource.data.payoutCents &lt;= 10000000
+          &amp;&amp; request.resource.data.active is bool &amp;&amp; audit();
+        allow delete: if false;
+      }
+      match /applications/{uid} {
+        allow get: if own(uid) || admin();
+        allow list: if admin();
+        allow create, update: if (own(uid)
+          &amp;&amp; (!exists(/databases/$(database)/documents/services/$(serviceId)/applications/$(uid)) || resource.data.status != &#x27;pending&#x27;)
+          &amp;&amp; request.resource.data.keys().hasOnly([&#x27;uid&#x27;,&#x27;name&#x27;,&#x27;email&#x27;,&#x27;offerId&#x27;,&#x27;status&#x27;,&#x27;requestedAt&#x27;])
+          &amp;&amp; request.resource.data.uid == uid &amp;&amp; request.resource.data.email == request.auth.token.email
+          &amp;&amp; request.resource.data.name is string &amp;&amp; request.resource.data.name.size() &gt; 0 &amp;&amp; request.resource.data.name.size() &lt;= 320
+          &amp;&amp; request.resource.data.status == &#x27;pending&#x27; &amp;&amp; request.resource.data.requestedAt == request.time
+          &amp;&amp; get(/databases/$(database)/documents/services/$(serviceId)/offers/$(request.resource.data.offerId)).data.active == true)
+          || (admin() &amp;&amp; resource.data.status == &#x27;pending&#x27;
+            &amp;&amp; request.resource.data.diff(resource.data).affectedKeys().hasOnly([&#x27;status&#x27;,&#x27;reviewedAt&#x27;,&#x27;reviewedBy&#x27;]) &amp;&amp; review()
+            &amp;&amp; (request.resource.data.status == &#x27;rejected&#x27; || (afterSubscription(uid).active == true
+              &amp;&amp; afterSubscription(uid).offerId == resource.data.offerId)));
+        allow delete: if false;
+      }
+      match /subscriptions/{uid} {
+        function hasPendingCompanyAccess() {
+          return company(request.auth.uid) &amp;&amp; resource.data.companyId == request.auth.uid
+            &amp;&amp; resource.data.activeRequestId != &#x27;&#x27;
+            &amp;&amp; requestBefore(resource.data.activeRequestId).status == &#x27;pending&#x27;
+            &amp;&amp; requestBefore(resource.data.activeRequestId).uid == uid;
+        }
+        function validAdminValues() {
+          return request.resource.data.keys().hasOnly([&#x27;uid&#x27;,&#x27;name&#x27;,&#x27;email&#x27;,&#x27;offerId&#x27;,&#x27;offerName&#x27;,&#x27;companyId&#x27;,&#x27;companyName&#x27;,&#x27;remaining&#x27;,&#x27;payoutCents&#x27;,&#x27;priceCents&#x27;,&#x27;active&#x27;,&#x27;activeRequestId&#x27;,&#x27;validUntil&#x27;,&#x27;paymentReference&#x27;,&#x27;updatedAt&#x27;,&#x27;updatedBy&#x27;])
+            &amp;&amp; request.resource.data.uid == uid &amp;&amp; request.resource.data.name is string &amp;&amp; request.resource.data.email is string
+            &amp;&amp; request.resource.data.offerId is string &amp;&amp; request.resource.data.offerName is string
+            &amp;&amp; request.resource.data.companyId is string &amp;&amp; request.resource.data.companyName is string
+            &amp;&amp; request.resource.data.remaining is int &amp;&amp; request.resource.data.remaining &gt;= 0 &amp;&amp; request.resource.data.remaining &lt;= 10000
+            &amp;&amp; request.resource.data.payoutCents is int &amp;&amp; request.resource.data.payoutCents &gt;= 0
+            &amp;&amp; request.resource.data.priceCents is int &amp;&amp; request.resource.data.priceCents &gt;= 0
+            &amp;&amp; request.resource.data.active is bool &amp;&amp; request.resource.data.activeRequestId is string
+            &amp;&amp; request.resource.data.validUntil is timestamp
+            &amp;&amp; request.resource.data.paymentReference is string &amp;&amp; request.resource.data.paymentReference.size() &gt;= 3
+            &amp;&amp; request.resource.data.paymentReference.size() &lt;= 160 &amp;&amp; audit();
+        }
+        allow get: if own(uid) || admin() || (verified() &amp;&amp; hasPendingCompanyAccess());
+        allow list: if admin();
+        allow create: if admin() &amp;&amp; validAdminValues() &amp;&amp; request.resource.data.activeRequestId == &#x27;&#x27;;
+        allow update: if (admin() &amp;&amp; validAdminValues())
+          || (own(uid)
+            &amp;&amp; request.resource.data.diff(resource.data).affectedKeys().hasOnly([&#x27;activeRequestId&#x27;,&#x27;updatedAt&#x27;])
+            &amp;&amp; request.resource.data.updatedAt == request.time
+            &amp;&amp; ((resource.data.activeRequestId == &#x27;&#x27; &amp;&amp; usable(resource.data)
+                &amp;&amp; request.resource.data.activeRequestId != &#x27;&#x27;
+                &amp;&amp; requestAfter(request.resource.data.activeRequestId).status == &#x27;pending&#x27;
+                &amp;&amp; requestAfter(request.resource.data.activeRequestId).uid == uid)
+              || (resource.data.activeRequestId != &#x27;&#x27; &amp;&amp; request.resource.data.activeRequestId == &#x27;&#x27;
+                &amp;&amp; requestBefore(resource.data.activeRequestId).status == &#x27;pending&#x27;
+                &amp;&amp; requestAfter(resource.data.activeRequestId).status == &#x27;cancelled&#x27;)))
+          || (verified() &amp;&amp; company(request.auth.uid) &amp;&amp; resource.data.companyId == request.auth.uid &amp;&amp; usable(resource.data)
+            &amp;&amp; request.resource.data.diff(resource.data).affectedKeys().hasOnly([&#x27;remaining&#x27;,&#x27;activeRequestId&#x27;,&#x27;updatedAt&#x27;])
+            &amp;&amp; request.resource.data.updatedAt == request.time &amp;&amp; request.resource.data.remaining == resource.data.remaining - 1
+            &amp;&amp; resource.data.activeRequestId != &#x27;&#x27; &amp;&amp; request.resource.data.activeRequestId == &#x27;&#x27;
+            &amp;&amp; requestBefore(resource.data.activeRequestId).status == &#x27;pending&#x27;
+            &amp;&amp; requestAfter(resource.data.activeRequestId).status == &#x27;confirmed&#x27;
+            &amp;&amp; ledgerAfter(resource.data.activeRequestId).uid == uid);
+        allow delete: if false;
+      }
+      match /requests/{id} {
+        allow read: if verified() &amp;&amp; (admin() || resource.data.uid == request.auth.uid || (resource.data.companyId == request.auth.uid &amp;&amp; company(request.auth.uid)));
+        allow create: if verified() &amp;&amp; enabled()
+          &amp;&amp; request.resource.data.keys().hasOnly([&#x27;uid&#x27;,&#x27;customerName&#x27;,&#x27;companyId&#x27;,&#x27;companyName&#x27;,&#x27;offerId&#x27;,&#x27;offerName&#x27;,&#x27;status&#x27;,&#x27;requestedAt&#x27;])
+          &amp;&amp; request.resource.data.uid == request.auth.uid
+          &amp;&amp; request.resource.data.status == &#x27;pending&#x27; &amp;&amp; request.resource.data.requestedAt == request.time
+          &amp;&amp; company(request.resource.data.companyId) &amp;&amp; usable(subscription(request.auth.uid))
+          &amp;&amp; subscription(request.auth.uid).activeRequestId == &#x27;&#x27; &amp;&amp; afterSubscription(request.auth.uid).activeRequestId == id
+          &amp;&amp; request.resource.data.customerName == subscription(request.auth.uid).name
+          &amp;&amp; request.resource.data.companyId == subscription(request.auth.uid).companyId
+          &amp;&amp; request.resource.data.companyName == subscription(request.auth.uid).companyName
+          &amp;&amp; request.resource.data.offerId == subscription(request.auth.uid).offerId
+          &amp;&amp; request.resource.data.offerName == subscription(request.auth.uid).offerName;
+        allow update: if verified() &amp;&amp; resource.data.status == &#x27;pending&#x27;
+          &amp;&amp; ((resource.data.uid == request.auth.uid
+              &amp;&amp; request.resource.data.diff(resource.data).affectedKeys().hasOnly([&#x27;status&#x27;,&#x27;cancelledAt&#x27;])
+              &amp;&amp; request.resource.data.status == &#x27;cancelled&#x27; &amp;&amp; request.resource.data.cancelledAt == request.time
+              &amp;&amp; subscription(resource.data.uid).activeRequestId == id &amp;&amp; afterSubscription(resource.data.uid).activeRequestId == &#x27;&#x27;)
+            || (resource.data.companyId == request.auth.uid &amp;&amp; company(request.auth.uid)
+              &amp;&amp; request.resource.data.diff(resource.data).affectedKeys().hasOnly([&#x27;status&#x27;,&#x27;confirmedAt&#x27;,&#x27;confirmedBy&#x27;])
+              &amp;&amp; request.resource.data.status == &#x27;confirmed&#x27; &amp;&amp; request.resource.data.confirmedAt == request.time
+              &amp;&amp; request.resource.data.confirmedBy == request.auth.uid &amp;&amp; usable(subscription(resource.data.uid))
+              &amp;&amp; subscription(resource.data.uid).activeRequestId == id &amp;&amp; afterSubscription(resource.data.uid).activeRequestId == &#x27;&#x27;
+              &amp;&amp; afterSubscription(resource.data.uid).remaining == subscription(resource.data.uid).remaining - 1
+              &amp;&amp; ledgerAfter(id).requestId == id));
+        allow delete: if false;
+      }
+      match /redemptions/{id} {
+        allow read: if verified() &amp;&amp; (admin() || resource.data.uid == request.auth.uid || (resource.data.companyId == request.auth.uid &amp;&amp; company(request.auth.uid)));
+        allow create: if verified() &amp;&amp; company(request.auth.uid)
+          &amp;&amp; request.resource.data.keys().hasOnly([&#x27;requestId&#x27;,&#x27;uid&#x27;,&#x27;customerName&#x27;,&#x27;companyId&#x27;,&#x27;companyName&#x27;,&#x27;offerId&#x27;,&#x27;offerName&#x27;,&#x27;quantity&#x27;,&#x27;payoutCents&#x27;,&#x27;paymentStatus&#x27;,&#x27;createdAt&#x27;])
+          &amp;&amp; request.resource.data.requestId == id &amp;&amp; request.resource.data.companyId == request.auth.uid
+          &amp;&amp; request.resource.data.quantity == 1 &amp;&amp; request.resource.data.paymentStatus == &#x27;open&#x27;
+          &amp;&amp; request.resource.data.createdAt == request.time
+          &amp;&amp; requestBefore(id).status == &#x27;pending&#x27; &amp;&amp; requestAfter(id).status == &#x27;confirmed&#x27;
+          &amp;&amp; requestBefore(id).uid == request.resource.data.uid
+          &amp;&amp; requestBefore(id).companyId == request.auth.uid
+          &amp;&amp; subscription(request.resource.data.uid).activeRequestId == id &amp;&amp; usable(subscription(request.resource.data.uid))
+          &amp;&amp; afterSubscription(request.resource.data.uid).remaining == subscription(request.resource.data.uid).remaining - 1
+          &amp;&amp; afterSubscription(request.resource.data.uid).activeRequestId == &#x27;&#x27;
+          &amp;&amp; request.resource.data.customerName == subscription(request.resource.data.uid).name
+          &amp;&amp; request.resource.data.companyName == subscription(request.resource.data.uid).companyName
+          &amp;&amp; request.resource.data.offerId == subscription(request.resource.data.uid).offerId
+          &amp;&amp; request.resource.data.offerName == subscription(request.resource.data.uid).offerName
+          &amp;&amp; request.resource.data.payoutCents == subscription(request.resource.data.uid).payoutCents;
+        allow update: if admin() &amp;&amp; resource.data.paymentStatus == &#x27;open&#x27;
+          &amp;&amp; request.resource.data.diff(resource.data).affectedKeys().hasOnly([&#x27;paymentStatus&#x27;,&#x27;paidAt&#x27;,&#x27;paidBy&#x27;,&#x27;paymentReference&#x27;])
+          &amp;&amp; request.resource.data.paymentStatus == &#x27;paid&#x27; &amp;&amp; request.resource.data.paidAt == request.time
+          &amp;&amp; request.resource.data.paidBy == request.auth.uid &amp;&amp; request.resource.data.paymentReference is string
+          &amp;&amp; request.resource.data.paymentReference.size() &gt;= 3 &amp;&amp; request.resource.data.paymentReference.size() &lt;= 160;
+        allow delete: if false;
+      }
+    }
+
+    match /services/{serviceId} {
+      function lc(uid) { return get(/databases/$(database)/documents/services/$(serviceId)/loyaltyContracts/$(uid)).data; }
+      function la(uid) { return getAfter(/databases/$(database)/documents/services/$(serviceId)/loyaltyContracts/$(uid)).data; }
+      function br(id) { return get(/databases/$(database)/documents/services/$(serviceId)/bonusRequests/$(id)).data; }
+      function ba(id) { return getAfter(/databases/$(database)/documents/services/$(serviceId)/bonusRequests/$(id)).data; }
+      function bl(id) { return getAfter(/databases/$(database)/documents/services/$(serviceId)/bonusRedemptions/$(id)).data; }
+      function partner(uid) { return verified() &amp;&amp; get(/databases/$(database)/documents/services/$(serviceId)/companies/$(uid)).data.active == true; }
+      function tariff(key) { return key == &#x27;basic&#x27; ? {&#x27;price&#x27;:2490,&#x27;units&#x27;:2,&#x27;detail&#x27;:1,&#x27;wash&#x27;:2,&#x27;voucher&#x27;:500} : key == &#x27;plus&#x27; ? {&#x27;price&#x27;:3490,&#x27;units&#x27;:3,&#x27;detail&#x27;:2,&#x27;wash&#x27;:3,&#x27;voucher&#x27;:1000} : {&#x27;price&#x27;:5490,&#x27;units&#x27;:5,&#x27;detail&#x27;:3,&#x27;wash&#x27;:4,&#x27;voucher&#x27;:1500}; }
+      function available(c,kind) {
+        return kind == &#x27;detail&#x27; ? int((c.paidMonths + 6) / 12) * tariff(c.planKey).detail - c.detailUsed
+          : kind == &#x27;bonusWash&#x27; ? int(c.paidMonths / 12) * tariff(c.planKey).wash - c.bonusWashUsed
+          : int(c.paidMonths / 12) * tariff(c.planKey).voucher - c.voucherIssuedCents;
+      }
+      function activeSubscriber(uid) {
+        let s=get(/databases/$(database)/documents/services/$(serviceId)/subscriptions/$(uid)).data;
+        return s.active == true &amp;&amp; s.validUntil &gt; request.time &amp;&amp; s.companyId == lc(uid).companyId &amp;&amp; s.offerId == lc(uid).offerId;
+      }
+      function receiptAfter(id) { return getAfter(/databases/$(database)/documents/services/$(serviceId)/monthlyPayments/$(id)).data; }
+      match /subscriptions/{uid} {
+        allow get: if verified() &amp;&amp; partner(request.auth.uid) &amp;&amp; resource.data.companyId == request.auth.uid &amp;&amp; lc(uid).companyId == request.auth.uid;
+      }
+      function benefitCounterUpdate(uid) {
+        let d=request.resource.data;
+        let kind=bl(d.lastBenefitId).kind;
+        return d.lastBenefitId != resource.data.lastBenefitId &amp;&amp; bl(d.lastBenefitId).uid == uid
+          &amp;&amp; ((kind == &#x27;detail&#x27; &amp;&amp; d.diff(resource.data).affectedKeys().hasOnly([&#x27;detailUsed&#x27;,&#x27;lastBenefitId&#x27;,&#x27;updatedAt&#x27;,&#x27;updatedBy&#x27;]) &amp;&amp; d.detailUsed == resource.data.detailUsed+1)
+           || (kind == &#x27;bonusWash&#x27; &amp;&amp; d.diff(resource.data).affectedKeys().hasOnly([&#x27;bonusWashUsed&#x27;,&#x27;lastBenefitId&#x27;,&#x27;updatedAt&#x27;,&#x27;updatedBy&#x27;]) &amp;&amp; d.bonusWashUsed == resource.data.bonusWashUsed+1)
+           || (kind == &#x27;voucher&#x27; &amp;&amp; d.diff(resource.data).affectedKeys().hasOnly([&#x27;voucherIssuedCents&#x27;,&#x27;lastBenefitId&#x27;,&#x27;updatedAt&#x27;,&#x27;updatedBy&#x27;]) &amp;&amp; d.voucherIssuedCents == resource.data.voucherIssuedCents+tariff(resource.data.planKey).voucher))
+          &amp;&amp; available(resource.data,kind)&gt;0;
+      }
+      match /loyaltyContracts/{uid} {
+        allow get: if own(uid) || admin() || (verified() &amp;&amp; resource.data.companyId == request.auth.uid &amp;&amp; partner(request.auth.uid));
+        allow list: if admin() || (verified() &amp;&amp; resource.data.companyId == request.auth.uid &amp;&amp; partner(request.auth.uid));
+        allow create: if serviceId == &#x27;carwash&#x27; &amp;&amp; admin()
+          &amp;&amp; request.resource.data.keys().hasOnly([&#x27;uid&#x27;,&#x27;name&#x27;,&#x27;companyId&#x27;,&#x27;companyName&#x27;,&#x27;offerId&#x27;,&#x27;contractId&#x27;,&#x27;planKey&#x27;,&#x27;planName&#x27;,&#x27;priceCents&#x27;,&#x27;monthlyUnits&#x27;,&#x27;paidMonths&#x27;,&#x27;lastPeriodStart&#x27;,&#x27;lastReceiptId&#x27;,&#x27;detailUsed&#x27;,&#x27;bonusWashUsed&#x27;,&#x27;voucherIssuedCents&#x27;,&#x27;lastBenefitId&#x27;,&#x27;washPayoutCents&#x27;,&#x27;detailPayoutCents&#x27;,&#x27;updatedAt&#x27;,&#x27;updatedBy&#x27;])
+          &amp;&amp; request.resource.data.uid == uid &amp;&amp; request.resource.data.planKey in [&#x27;basic&#x27;,&#x27;plus&#x27;,&#x27;premium&#x27;]
+          &amp;&amp; request.resource.data.priceCents == tariff(request.resource.data.planKey).price
+          &amp;&amp; request.resource.data.monthlyUnits == tariff(request.resource.data.planKey).units
+          &amp;&amp; request.resource.data.paidMonths == 0 &amp;&amp; request.resource.data.lastPeriodStart == timestamp.value(0)
+          &amp;&amp; request.resource.data.lastReceiptId == &#x27;&#x27; &amp;&amp; request.resource.data.detailUsed == 0
+          &amp;&amp; request.resource.data.bonusWashUsed == 0 &amp;&amp; request.resource.data.voucherIssuedCents == 0
+          &amp;&amp; request.resource.data.lastBenefitId == &#x27;&#x27; &amp;&amp; request.resource.data.washPayoutCents == 500 &amp;&amp; request.resource.data.detailPayoutCents == 5000
+          &amp;&amp; request.resource.data.contractId is string &amp;&amp; request.resource.data.contractId.size() &gt;= 16
+          &amp;&amp; request.resource.data.companyId == get(/databases/$(database)/documents/services/$(serviceId)/subscriptions/$(uid)).data.companyId
+          &amp;&amp; request.resource.data.offerId == get(/databases/$(database)/documents/services/$(serviceId)/subscriptions/$(uid)).data.offerId
+          &amp;&amp; audit();
+        allow update: if audit() &amp;&amp; ((admin()
+          &amp;&amp; request.resource.data.diff(resource.data).affectedKeys().hasOnly([&#x27;paidMonths&#x27;,&#x27;lastPeriodStart&#x27;,&#x27;lastReceiptId&#x27;,&#x27;updatedAt&#x27;,&#x27;updatedBy&#x27;])
+          &amp;&amp; request.resource.data.paidMonths == resource.data.paidMonths+1 &amp;&amp; request.resource.data.paidMonths &lt;= 1200
+          &amp;&amp; request.resource.data.lastPeriodStart &gt; resource.data.lastPeriodStart &amp;&amp; request.resource.data.lastPeriodStart &lt;= request.time
+          &amp;&amp; receiptAfter(request.resource.data.lastReceiptId).uid == uid
+          &amp;&amp; receiptAfter(request.resource.data.lastReceiptId).contractId == resource.data.contractId
+          &amp;&amp; receiptAfter(request.resource.data.lastReceiptId).periodStart == request.resource.data.lastPeriodStart
+          &amp;&amp; receiptAfter(request.resource.data.lastReceiptId).amountCents == resource.data.priceCents)
+          || (verified() &amp;&amp; benefitCounterUpdate(uid)
+            &amp;&amp; ((bl(request.resource.data.lastBenefitId).kind == &#x27;voucher&#x27; &amp;&amp; admin())
+              || (bl(request.resource.data.lastBenefitId).kind in [&#x27;detail&#x27;,&#x27;bonusWash&#x27;] &amp;&amp; resource.data.companyId == request.auth.uid &amp;&amp; partner(request.auth.uid)))));
+        allow delete: if false;
+      }
+      match /monthlyPayments/{id} {
+        allow read: if admin() || (verified() &amp;&amp; resource.data.uid == request.auth.uid);
+        allow create: if serviceId == &#x27;carwash&#x27; &amp;&amp; admin()
+          &amp;&amp; request.resource.data.keys().hasOnly([&#x27;uid&#x27;,&#x27;contractId&#x27;,&#x27;period&#x27;,&#x27;periodStart&#x27;,&#x27;amountCents&#x27;,&#x27;reference&#x27;,&#x27;recordedAt&#x27;,&#x27;recordedBy&#x27;])
+          &amp;&amp; id == request.resource.data.contractId+&#x27;--&#x27;+request.resource.data.period
+          &amp;&amp; request.resource.data.period.matches(&#x27;^[0-9]{4}-(0[1-9]|1[0-2])$&#x27;)
+          &amp;&amp; request.resource.data.periodStart == timestamp.date(int(request.resource.data.period.split(&#x27;-&#x27;)[0]),int(request.resource.data.period.split(&#x27;-&#x27;)[1]),1)
+          &amp;&amp; request.resource.data.contractId == lc(request.resource.data.uid).contractId
+          &amp;&amp; request.resource.data.amountCents == lc(request.resource.data.uid).priceCents
+          &amp;&amp; request.resource.data.periodStart is timestamp &amp;&amp; request.resource.data.periodStart &lt;= request.time
+          &amp;&amp; request.resource.data.periodStart &gt; lc(request.resource.data.uid).lastPeriodStart
+          &amp;&amp; request.resource.data.reference is string &amp;&amp; request.resource.data.reference.size() &gt;= 3 &amp;&amp; request.resource.data.reference.size() &lt;= 160
+          &amp;&amp; request.resource.data.recordedAt == request.time &amp;&amp; request.resource.data.recordedBy == request.auth.uid
+          &amp;&amp; la(request.resource.data.uid).paidMonths == lc(request.resource.data.uid).paidMonths+1
+          &amp;&amp; la(request.resource.data.uid).lastReceiptId == id;
+        allow update, delete: if false;
+      }
+      match /bonusRequests/{id} {
+        allow read: if admin() || (verified() &amp;&amp; (resource.data.uid == request.auth.uid || (resource.data.companyId == request.auth.uid &amp;&amp; partner(request.auth.uid))));
+        allow create: if serviceId == &#x27;carwash&#x27; &amp;&amp; verified() &amp;&amp; request.resource.data.uid == request.auth.uid
+          &amp;&amp; request.resource.data.keys().hasOnly([&#x27;uid&#x27;,&#x27;contractId&#x27;,&#x27;customerName&#x27;,&#x27;companyId&#x27;,&#x27;companyName&#x27;,&#x27;kind&#x27;,&#x27;status&#x27;,&#x27;requestedAt&#x27;])
+          &amp;&amp; request.resource.data.kind in [&#x27;detail&#x27;,&#x27;bonusWash&#x27;,&#x27;voucher&#x27;]
+          &amp;&amp; request.resource.data.contractId == lc(request.auth.uid).contractId
+          &amp;&amp; request.resource.data.customerName == lc(request.auth.uid).name
+          &amp;&amp; request.resource.data.companyId == lc(request.auth.uid).companyId &amp;&amp; request.resource.data.companyName == lc(request.auth.uid).companyName
+          &amp;&amp; request.resource.data.status == &#x27;pending&#x27; &amp;&amp; request.resource.data.requestedAt == request.time
+          &amp;&amp; available(lc(request.auth.uid),request.resource.data.kind)&gt;0 &amp;&amp; activeSubscriber(request.auth.uid);
+        allow update: if verified() &amp;&amp; resource.data.status == &#x27;pending&#x27;
+          &amp;&amp; ((own(resource.data.uid) &amp;&amp; request.resource.data.diff(resource.data).affectedKeys().hasOnly([&#x27;status&#x27;,&#x27;cancelledAt&#x27;])
+              &amp;&amp; request.resource.data.status == &#x27;cancelled&#x27; &amp;&amp; request.resource.data.cancelledAt == request.time)
+            || (request.resource.data.diff(resource.data).affectedKeys().hasOnly([&#x27;status&#x27;,&#x27;confirmedAt&#x27;,&#x27;confirmedBy&#x27;])
+              &amp;&amp; request.resource.data.status == &#x27;confirmed&#x27; &amp;&amp; request.resource.data.confirmedAt == request.time &amp;&amp; request.resource.data.confirmedBy == request.auth.uid
+              &amp;&amp; bl(id).requestId == id &amp;&amp; la(resource.data.uid).lastBenefitId == id
+              &amp;&amp; ((resource.data.kind == &#x27;voucher&#x27; &amp;&amp; admin()) || (resource.data.kind != &#x27;voucher&#x27; &amp;&amp; resource.data.companyId == request.auth.uid &amp;&amp; partner(request.auth.uid)))));
+        allow delete: if false;
+      }
+      match /bonusRedemptions/{id} {
+        allow read: if admin() || (verified() &amp;&amp; (resource.data.uid == request.auth.uid || (resource.data.companyId == request.auth.uid &amp;&amp; partner(request.auth.uid))));
+        allow create: if serviceId == &#x27;carwash&#x27; &amp;&amp; verified()
+          &amp;&amp; request.resource.data.keys().hasOnly([&#x27;requestId&#x27;,&#x27;uid&#x27;,&#x27;contractId&#x27;,&#x27;customerName&#x27;,&#x27;companyId&#x27;,&#x27;companyName&#x27;,&#x27;offerId&#x27;,&#x27;offerName&#x27;,&#x27;kind&#x27;,&#x27;quantity&#x27;,&#x27;payoutCents&#x27;,&#x27;voucherCents&#x27;,&#x27;deliveryReference&#x27;,&#x27;paymentStatus&#x27;,&#x27;createdAt&#x27;])
+          &amp;&amp; request.resource.data.requestId == id &amp;&amp; br(id).status == &#x27;pending&#x27; &amp;&amp; ba(id).status == &#x27;confirmed&#x27;
+          &amp;&amp; request.resource.data.uid == br(id).uid &amp;&amp; request.resource.data.kind == br(id).kind
+          &amp;&amp; request.resource.data.contractId == lc(request.resource.data.uid).contractId
+          &amp;&amp; request.resource.data.customerName == lc(request.resource.data.uid).name
+          &amp;&amp; request.resource.data.companyId == lc(request.resource.data.uid).companyId
+          &amp;&amp; request.resource.data.companyName == lc(request.resource.data.uid).companyName
+          &amp;&amp; request.resource.data.offerId == lc(request.resource.data.uid).offerId
+          &amp;&amp; request.resource.data.quantity == 1 &amp;&amp; request.resource.data.paymentStatus == &#x27;open&#x27; &amp;&amp; request.resource.data.createdAt == request.time
+          &amp;&amp; activeSubscriber(request.resource.data.uid) &amp;&amp; available(lc(request.resource.data.uid),request.resource.data.kind)&gt;0
+          &amp;&amp; la(request.resource.data.uid).lastBenefitId == id
+          &amp;&amp; ((request.resource.data.kind == &#x27;detail&#x27; &amp;&amp; partner(request.auth.uid) &amp;&amp; request.resource.data.companyId == request.auth.uid
+              &amp;&amp; request.resource.data.payoutCents == lc(request.resource.data.uid).detailPayoutCents &amp;&amp; request.resource.data.voucherCents == 0
+              &amp;&amp; la(request.resource.data.uid).detailUsed == lc(request.resource.data.uid).detailUsed+1)
+            || (request.resource.data.kind == &#x27;bonusWash&#x27; &amp;&amp; partner(request.auth.uid) &amp;&amp; request.resource.data.companyId == request.auth.uid
+              &amp;&amp; request.resource.data.payoutCents == lc(request.resource.data.uid).washPayoutCents &amp;&amp; request.resource.data.voucherCents == 0
+              &amp;&amp; la(request.resource.data.uid).bonusWashUsed == lc(request.resource.data.uid).bonusWashUsed+1)
+            || (request.resource.data.kind == &#x27;voucher&#x27; &amp;&amp; admin() &amp;&amp; request.resource.data.payoutCents == 0
+              &amp;&amp; request.resource.data.voucherCents == tariff(lc(request.resource.data.uid).planKey).voucher
+              &amp;&amp; request.resource.data.deliveryReference is string &amp;&amp; request.resource.data.deliveryReference.size() &gt;= 3 &amp;&amp; request.resource.data.deliveryReference.size() &lt;= 160
+              &amp;&amp; la(request.resource.data.uid).voucherIssuedCents == lc(request.resource.data.uid).voucherIssuedCents+tariff(lc(request.resource.data.uid).planKey).voucher));
+        allow update: if admin() &amp;&amp; resource.data.kind != &#x27;voucher&#x27; &amp;&amp; resource.data.paymentStatus == &#x27;open&#x27;
+          &amp;&amp; request.resource.data.diff(resource.data).affectedKeys().hasOnly([&#x27;paymentStatus&#x27;,&#x27;paidAt&#x27;,&#x27;paidBy&#x27;,&#x27;paymentReference&#x27;])
+          &amp;&amp; request.resource.data.paymentStatus == &#x27;paid&#x27; &amp;&amp; request.resource.data.paidAt == request.time
+          &amp;&amp; request.resource.data.paidBy == request.auth.uid &amp;&amp; request.resource.data.paymentReference is string
+          &amp;&amp; request.resource.data.paymentReference.size() &gt;= 3 &amp;&amp; request.resource.data.paymentReference.size() &lt;= 160;
+        allow delete: if false;
+      }
+    }
+
+    // Free accounts are not subscriptions and confer no staff/admin privileges.
+    match /platformProfiles/{uid} {
+      allow get: if (request.auth != null &amp;&amp; request.auth.uid == uid) || admin();
+      allow list: if admin();
+      allow create: if request.auth != null &amp;&amp; request.auth.uid == uid
+        &amp;&amp; request.resource.data.keys().hasAll([&#x27;uid&#x27;,&#x27;name&#x27;,&#x27;email&#x27;,&#x27;accountType&#x27;,&#x27;createdAt&#x27;])
+        &amp;&amp; request.resource.data.keys().hasOnly([&#x27;uid&#x27;,&#x27;name&#x27;,&#x27;email&#x27;,&#x27;accountType&#x27;,&#x27;createdAt&#x27;])
+        &amp;&amp; request.resource.data.uid == uid
+        &amp;&amp; request.resource.data.name is string &amp;&amp; request.resource.data.name.size() &gt; 0 &amp;&amp; request.resource.data.name.size() &lt;= 100
+        &amp;&amp; request.resource.data.email == request.auth.token.email
+        &amp;&amp; request.resource.data.accountType in [&#x27;customer&#x27;,&#x27;company&#x27;]
+        &amp;&amp; request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+    match /platformViews/{viewId} {
+      allow get: if (verified() &amp;&amp; viewId in [request.auth.uid + &#x27;_coffee&#x27;,request.auth.uid + &#x27;_carwash&#x27;]) || admin();
+      allow list: if admin();
+      allow create: if verified()
+        &amp;&amp; request.resource.data.keys().hasAll([&#x27;uid&#x27;,&#x27;category&#x27;,&#x27;firstViewedAt&#x27;,&#x27;lastViewedAt&#x27;])
+        &amp;&amp; request.resource.data.keys().hasOnly([&#x27;uid&#x27;,&#x27;category&#x27;,&#x27;firstViewedAt&#x27;,&#x27;lastViewedAt&#x27;])
+        &amp;&amp; request.resource.data.uid == request.auth.uid
+        &amp;&amp; request.resource.data.category in [&#x27;coffee&#x27;,&#x27;carwash&#x27;]
+        &amp;&amp; viewId == request.auth.uid + &#x27;_&#x27; + request.resource.data.category
+        &amp;&amp; request.resource.data.firstViewedAt == request.time
+        &amp;&amp; request.resource.data.lastViewedAt == request.time
+        &amp;&amp; exists(/databases/$(database)/documents/platformProfiles/$(request.auth.uid));
+      allow update: if own(resource.data.uid)
+        &amp;&amp; request.resource.data.diff(resource.data).affectedKeys().hasOnly([&#x27;lastViewedAt&#x27;])
+        &amp;&amp; request.resource.data.lastViewedAt == request.time;
+      allow delete: if false;
+    }
+    match /partnerRegistrationDrafts/{draftId} {
+      function draftOwner() { return request.auth != null &amp;&amp; draftId in [request.auth.uid + &#x27;_coffee&#x27;,request.auth.uid + &#x27;_carwash&#x27;]; }
+      allow get: if draftOwner() || admin();
+      allow list: if admin();
+      allow create, update: if draftOwner()
+        &amp;&amp; request.resource.data.keys().hasAll([&#x27;uid&#x27;,&#x27;category&#x27;,&#x27;email&#x27;,&#x27;name&#x27;,&#x27;address&#x27;,&#x27;partnerAgreementVersion&#x27;,&#x27;partnerAgreementAt&#x27;])
+        &amp;&amp; request.resource.data.keys().hasOnly([&#x27;uid&#x27;,&#x27;category&#x27;,&#x27;email&#x27;,&#x27;name&#x27;,&#x27;address&#x27;,&#x27;partnerAgreementVersion&#x27;,&#x27;partnerAgreementAt&#x27;])
+        &amp;&amp; request.resource.data.uid == request.auth.uid
+        &amp;&amp; request.resource.data.category in [&#x27;coffee&#x27;,&#x27;carwash&#x27;]
+        &amp;&amp; draftId == request.auth.uid + &#x27;_&#x27; + request.resource.data.category
+        &amp;&amp; request.resource.data.email == request.auth.token.email
+        &amp;&amp; request.resource.data.name is string &amp;&amp; request.resource.data.name.size() &gt; 0 &amp;&amp; request.resource.data.name.size() &lt;= 120
+        &amp;&amp; request.resource.data.address is string &amp;&amp; request.resource.data.address.size() &gt; 0 &amp;&amp; request.resource.data.address.size() &lt;= 250
+        &amp;&amp; request.resource.data.partnerAgreementVersion == &#x27;2026-10-19&#x27;
+        &amp;&amp; request.resource.data.partnerAgreementAt == request.time;
+      allow delete: if false;
+    }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}
+</textarea><script>document.getElementById('copy').onclick=async()=>{const t=document.getElementById('rules');t.focus();t.select();try{await navigator.clipboard.writeText(t.value);document.getElementById('status').textContent='Kopiert.'}catch{document.getElementById('status').textContent='Text ist ausgewählt. Mit Strg+C beziehungsweise Cmd+C kopieren.'}};</script></html>
