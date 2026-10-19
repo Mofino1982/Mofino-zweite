@@ -1,0 +1,12 @@
+const {test,before,after,beforeEach}=require('node:test');
+const {initializeTestEnvironment,assertSucceeds,assertFails}=require('@firebase/rules-unit-testing');
+const {doc,setDoc,getDoc,getDocs,collection,updateDoc}=require('firebase/firestore');
+const fs=require('node:fs');let env;
+const db=uid=>env.authenticatedContext(uid,{email:uid+'@example.test',email_verified:true}).firestore();
+before(async()=>{env=await initializeTestEnvironment({projectId:'demo-mosabo-platform',firestore:{host:'127.0.0.1',port:8190,rules:fs.readFileSync(__dirname+'/../output/Mo-s-Abo-Stripe/backend/firestore.rules','utf8')}})});
+after(()=>env?.cleanup());
+beforeEach(async()=>{await env.clearFirestore();await env.withSecurityRulesDisabled(async c=>{await setDoc(doc(c.firestore(),'admins/admin'),{active:true});await setDoc(doc(c.firestore(),'billingInvoices/in_test'),{uid:'client',amountCents:2000,status:'paid'});await setDoc(doc(c.firestore(),'billingSettings/main'),{enabled:false,mode:'test'})})});
+test('Kunden können keine Stripe-Zahlungen oder Freischaltungen vortäuschen',async()=>{for(const col of ['billingInvoices','billingOrders','billingAccounts','billingCycles','billingFailures'])await assertFails(setDoc(doc(db('client'),col+'/fake'),{uid:'client',status:'paid',remaining:99}));});
+test('Stripe-Einstellungen sind auch für Admin-Browser schreibgeschützt',async()=>{await assertFails(updateDoc(doc(db('client'),'billingSettings/main'),{enabled:true}));await assertFails(updateDoc(doc(db('admin'),'billingSettings/main'),{enabled:true}));});
+test('Nur freigegebener Admin darf die Zahlungsübersicht lesen',async()=>{await assertSucceeds(getDocs(collection(db('admin'),'billingInvoices')));await assertFails(getDocs(collection(db('client'),'billingInvoices')));await assertFails(getDoc(doc(db('other'),'billingInvoices/in_test')));});
+test('Anonymer Aufruf sieht weder Zahlungsdaten noch Einstellungen',async()=>{const a=env.unauthenticatedContext().firestore();await assertFails(getDocs(collection(a,'billingInvoices')));await assertFails(getDoc(doc(a,'billingSettings/main')));});

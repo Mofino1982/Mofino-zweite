@@ -9,6 +9,10 @@ service cloud.firestore {
       return verified()
         && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true;
     }
+    function accountRole(role) {
+      return request.auth != null
+        && get(/databases/$(database)/documents/platformProfiles/$(request.auth.uid)).data.accountType == role;
+    }
     function audit() {
       return request.resource.data.updatedAt == request.time
         && request.resource.data.updatedBy == request.auth.uid;
@@ -34,7 +38,7 @@ service cloud.firestore {
     match /members/{uid} {
       allow get: if own(uid) || admin();
       allow list: if admin();
-      allow create: if own(uid)
+      allow create: if own(uid) && accountRole('customer')
         && request.resource.data.keys().hasAll(['name','email','memberId','remaining','active','createdAt'])
         && request.resource.data.keys().hasOnly(['name','email','memberId','remaining','active','createdAt'])
         && request.resource.data.name is string
@@ -54,15 +58,15 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /membershipRequests/{uid} {
-      allow get: if own(uid) || admin();
+      allow get: if own(uid) && accountRole('customer') || admin();
       allow list: if admin();
-      allow create: if own(uid)
+      allow create: if own(uid) && accountRole('customer')
         && request.resource.data.keys().hasOnly(['plan','email','status','requestedAt'])
         && plan(request.resource.data.plan)
         && request.resource.data.email == request.auth.token.email
         && request.resource.data.status == 'pending'
         && request.resource.data.requestedAt == request.time;
-      allow update: if (own(uid)
+      allow update: if (own(uid) && accountRole('customer')
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['plan','email','status','requestedAt'])
         && plan(request.resource.data.plan)
         && request.resource.data.email == request.auth.token.email
@@ -90,7 +94,7 @@ service cloud.firestore {
     match /cafeApplications/{uid} {
       allow get: if own(uid) || admin();
       allow list: if admin();
-      allow create: if own(uid)
+      allow create: if own(uid) && accountRole('company')
         && request.resource.data.keys().hasOnly(['cafeName','address','email','status','createdAt','partnerAgreementVersion','partnerAgreementAt'])
         && request.resource.data.partnerAgreementVersion == '2026-10-19'
         && request.resource.data.partnerAgreementAt == request.time
@@ -166,7 +170,7 @@ service cloud.firestore {
       match /companies/{uid} {
         allow get: if own(uid) || admin();
         allow list: if admin();
-        allow create: if own(uid) && companyFields(request.resource.data)
+        allow create: if own(uid) && accountRole('company') && companyFields(request.resource.data)
           && request.resource.data.partnerAgreementVersion == '2026-10-19'
           && request.resource.data.partnerAgreementAt == request.time
           && request.resource.data.keys().hasOnly(['name','address','email','status','active','createdAt','partnerAgreementVersion','partnerAgreementAt'])
@@ -451,7 +455,7 @@ service cloud.firestore {
     match /platformViews/{viewId} {
       allow get: if (verified() && viewId in [request.auth.uid + '_coffee',request.auth.uid + '_carwash']) || admin();
       allow list: if admin();
-      allow create: if verified()
+      allow create: if verified() && accountRole('customer')
         && request.resource.data.keys().hasAll(['uid','category','firstViewedAt','lastViewedAt'])
         && request.resource.data.keys().hasOnly(['uid','category','firstViewedAt','lastViewedAt'])
         && request.resource.data.uid == request.auth.uid
@@ -469,7 +473,7 @@ service cloud.firestore {
       function draftOwner() { return request.auth != null && draftId in [request.auth.uid + '_coffee',request.auth.uid + '_carwash']; }
       allow get: if draftOwner() || admin();
       allow list: if admin();
-      allow create, update: if draftOwner()
+      allow create, update: if draftOwner() && accountRole('company')
         && request.resource.data.keys().hasAll(['uid','category','email','name','address','partnerAgreementVersion','partnerAgreementAt'])
         && request.resource.data.keys().hasOnly(['uid','category','email','name','address','partnerAgreementVersion','partnerAgreementAt'])
         && request.resource.data.uid == request.auth.uid
@@ -483,6 +487,42 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Public location projection contains no private staff or account data.
+    match /publicPartners/{id} {
+      allow read: if admin() || (verified() && resource.data.active == true);
+      allow create, update: if admin()
+        && request.resource.data.keys().hasAll(['name','address','category','active','updatedAt','updatedBy'])
+        && request.resource.data.keys().hasOnly(['name','address','category','active','updatedAt','updatedBy','logoData','logoAlt'])
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 120
+        && request.resource.data.address is string && request.resource.data.address.size() > 0 && request.resource.data.address.size() <= 250
+        && request.resource.data.category in ['coffee','carwash']
+        && request.resource.data.active is bool
+        && (!('logoData' in request.resource.data) || (request.resource.data.logoData is string && request.resource.data.logoData.size() <= 200000 && request.resource.data.logoData.matches('^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$')))
+        && (!('logoAlt' in request.resource.data) || (request.resource.data.logoAlt is string && request.resource.data.logoAlt.size() <= 160))
+        && audit();
+      allow delete: if false;
+    }
+    match /partnerBranding/{id} {
+      function logoOwner() { return verified() && accountRole('company') && id in [request.auth.uid + '_coffee', request.auth.uid + '_carwash']; }
+      allow get: if logoOwner() || admin();
+      allow list: if admin();
+      allow create, update: if logoOwner()
+        && request.resource.data.keys().hasOnly(['uid','category','logoData','logoAlt','updatedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.category in ['coffee','carwash']
+        && id == request.auth.uid + '_' + request.resource.data.category
+        && request.resource.data.logoData is string && request.resource.data.logoData.size() <= 200000
+        && request.resource.data.logoData.matches('^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$')
+        && request.resource.data.logoAlt is string && request.resource.data.logoAlt.size() <= 160
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+    match /billingAccounts/{id} { allow read: if admin(); allow write: if false; }
+    match /billingOrders/{id} { allow read: if admin(); allow write: if false; }
+    match /billingInvoices/{id} { allow read: if admin(); allow write: if false; }
+    match /billingCycles/{id} { allow read: if admin(); allow write: if false; }
+    match /billingFailures/{id} { allow read: if admin(); allow write: if false; }
+    match /billingSettings/{id} { allow read: if admin(); allow write: if false; }
     match /{document=**} { allow read, write: if false; }
   }
 }

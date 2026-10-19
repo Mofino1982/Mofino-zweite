@@ -1,0 +1,18 @@
+import * as appApi from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js';
+import * as authApi from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js';
+import * as funApi from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-functions.js';
+const app=appApi.getApps().find(a=>a.name==='[DEFAULT]')||appApi.initializeApp(__CONFIG__),auth=authApi.getAuth(app),functions=funApi.getFunctions(app,'europe-west3');
+const status=document.getElementById('moStripeStatus');
+function say(value){if(status)status.textContent=value;}
+function failure(e){return e?.message?.replace(/^Firebase:\s*/,'')||'Die Zahlung konnte nicht gestartet werden. Bitte erneut versuchen.';}
+let working=false;
+window.moStripeCheckout=async data=>{if(working)return;const user=auth.currentUser;if(!user?.emailVerified){say('Bitte zuerst anmelden und die E-Mail bestätigen.');throw Error('Bitte zuerst anmelden und die E-Mail bestätigen.');}working=true;say('Sicherer Stripe-Checkout wird geöffnet …');try{const result=await funApi.httpsCallable(functions,'createStripeCheckout')({...data,termsAccepted:true});const url=new URL(result.data.url);if(url.origin!=='https://checkout.stripe.com')throw Error('Ungültige Zahlungsadresse.');location.assign(url.href);}catch(e){say(failure(e));throw e}finally{working=false}};
+for(const [buttonId,termsId,selector] of [['moStripePay','moStripeTerms','input[name="club-plan"]:checked'],['moStripeMemberPay','moStripeMemberTerms','#requestedPlan']]){
+ const button=document.getElementById(buttonId);if(!button)continue;const terms=document.getElementById(termsId);button.disabled=!terms.checked;terms.onchange=()=>{button.disabled=!terms.checked};button.onclick=async()=>{if(!terms.checked)return;const plan=document.querySelector(selector)?.value;if(!plan){say('Bitte zuerst einen Tarif wählen.');return}try{await window.moStripeCheckout({category:'coffee',plan})}catch{}};
+}
+document.getElementById('moStripePortal')?.addEventListener('click',async()=>{const c=document.getElementById('moStripeCategory')?.value||__CATEGORY__;try{const r=await funApi.httpsCallable(functions,'createStripePortal')({category:c});const u=new URL(r.data.url);if(u.origin!=='https://billing.stripe.com')throw Error('Ungültige Verwaltungsadresse.');location.assign(u.href);}catch(e){say(failure(e))}});
+if(document.getElementById('moStripeResult')){
+ const c=new URLSearchParams(location.search).get('bereich'),valid=['coffee','carwash'].includes(c);let polling=0;
+ async function refresh(user){if(!valid){say('Bitte Café oder Autowäsche wählen.');return}if(!user?.emailVerified){say('Bitte mit deinem bestätigten Mo‘s-Abo-Konto anmelden.');return}try{const r=await funApi.httpsCallable(functions,'getStripeStatus')({category:c}),s=r.data;if(s.testPaid){say('Testzahlung erfolgreich. Es wurde kein echtes Abo und kein einlösbares Guthaben freigeschaltet.');return}if(s.active){say('Zahlung bestätigt. Dein Abo ist freigeschaltet.');document.getElementById('moStripeResult').href=c==='coffee'?'cafe-kunden.html#app':'autowaschen-kunden.html#kunden';document.getElementById('moStripeResult').hidden=false;location.replace(document.getElementById('moStripeResult').href);return}if(new URLSearchParams(location.search).has('cancelled')){say('Checkout verlassen. Es wurde keine Freischaltung ausgelöst.');return}say('Wir warten auf die bestätigte Stripe-Zahlung. Eine Rückkehr vom Checkout allein schaltet kein Abo frei.');if(polling++<30)setTimeout(()=>{if(auth.currentUser?.uid===user.uid)refresh(user)},2000);else say('Die Bestätigung steht noch aus. Bitte später den Zahlungsstatus erneut öffnen.');}catch(e){say(failure(e))}}
+ authApi.onAuthStateChanged(auth,refresh);
+}
