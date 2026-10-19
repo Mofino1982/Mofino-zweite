@@ -110,4 +110,4 @@ auths.onAuthStateChanged(auth,async user=>{const run=++generation;stops.forEach(
  for(const target of grids){stops.push(fs.onSnapshot(fs.query(fs.collection(db,'publicPartners'),fs.where('category','==',target.id==='verifiedWashGrid'?'carwash':'coffee'),fs.where('active','==',true),fs.limit(100)),snapshot=>{if(run!==generation)return;renderPartners(target,snapshot.docs.map(d=>d.data()))},()=>{if(run===generation)renderPartners(target,[],'Freigaben können gerade nicht geladen werden. Die Verzeichniseinträge sind keine Einlösefreigabe.')}));}
  if(panel){try{const role=await fs.getDoc(fs.doc(db,'admins',user.uid));if(run!==generation||!role.exists()||role.data().active!==true)return;panel.hidden=false;await reloadAdmin()}catch{if(run===generation){panel.hidden=false;out.textContent='Die Standortverwaltung konnte nicht geladen werden.'}}}
 });
-</script></body></html>
+</script><section data-subscription-manage="true" style="max-width:1100px;margin:24px auto;padding:20px"><a href="abo-verwalten.html" class="btn outline" style="color:#e4ba78">Abo verwalten / kündigen →</a></section></body></html>
