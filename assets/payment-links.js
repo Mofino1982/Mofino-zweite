@@ -1,5 +1,5 @@
 // Vom Betreiber bestätigte Zuordnung. Ausschließlich Stripe-Sandbox.
-window.moPaymentLinks={mode:'payment-links-test',coffee:{
+window.moPaymentLinks={mode:'server-checkout',coffee:{
  basic:{priceCents:2000,url:'https://buy.stripe.com/test_7sY6oA1j78yagZCgZxgMw00'},
  standard:{priceCents:3500,url:'https://buy.stripe.com/test_fZu9AMge1cOq5gU8t1gMw02'},
  premium:{priceCents:6000,url:'https://buy.stripe.com/test_7sY7sE4vjcOq4cQ24DgMw01'},
