@@ -1,0 +1,15 @@
+import {auth,functions} from './firebase-client.mjs';
+import {onAuthStateChanged,signInWithEmailAndPassword,createUserWithEmailAndPassword,sendEmailVerification,signOut} from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js';
+import {httpsCallable} from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-functions.js';
+import {WORLDS} from './partner-policy.mjs';
+const $=id=>document.getElementById(id),form=$('companyApplication'),say=t=>$('companyAccountStatus').textContent=t;let working=false;
+for(const w of WORLDS)form.elements.category.append(new Option(w.name,w.id));
+function branches(){form.elements.branch.replaceChildren();for(const b of WORLDS.find(w=>w.id===form.elements.category.value).branches)form.elements.branch.append(new Option(b,b));}branches();form.elements.category.onchange=branches;
+async function action(fn){if(working)return;working=true;try{await fn()}catch(e){say(e.message||'Vorgang fehlgeschlagen.')}finally{working=false}}
+$('companyAuthForm').onsubmit=e=>{e.preventDefault();action(async()=>{await signInWithEmailAndPassword(auth,$('companyEmail').value.trim(),$('companyPassword').value);$('companyPassword').value='';})};
+$('companyRegister').onclick=()=>action(async()=>{if(!$('companyEmail').reportValidity())return;if($('companyPassword').value.length<8)throw Error('Bitte ein Passwort mit mindestens 8 Zeichen verwenden.');const result=await createUserWithEmailAndPassword(auth,$('companyEmail').value.trim(),$('companyPassword').value);$('companyPassword').value='';await sendEmailVerification(result.user);say('Bitte deine E-Mail bestätigen.');});
+$('companyVerifySend').onclick=()=>action(async()=>{await sendEmailVerification(auth.currentUser);say('Bestätigungs-E-Mail gesendet.');});
+$('companyVerifyCheck').onclick=()=>action(async()=>{await auth.currentUser.reload();await auth.currentUser.getIdToken(true);paint(auth.currentUser)});
+$('companyAccountLogout').onclick=()=>signOut(auth);
+function paint(user){$('companyAuthForm').hidden=!!user;$('companyVerify').hidden=!user||user.emailVerified;$('companyAccountLogout').hidden=!user;$('companyApplicationPanel').hidden=!user?.emailVerified;say(user?.emailVerified?'Bitte Firmenangaben zur Freigabe einreichen.':user?'Bitte zuerst deine E-Mail bestätigen.':'Bitte ein separates Firmenkonto anmelden oder erstellen.');}onAuthStateChanged(auth,paint);
+form.onsubmit=e=>{e.preventDefault();action(async()=>{const data=Object.fromEntries(new FormData(form));delete data.logo;const file=form.elements.logo.files[0];if(file){if(file.size>140000||!['image/png','image/jpeg','image/webp'].includes(file.type))throw Error('Logo bitte als PNG/JPEG/WebP bis 140 KB.');data.logoData=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(Error('Logo konnte nicht geladen werden.'));r.readAsDataURL(file);});}await httpsCallable(functions,'registerPartnerCompany')(data);say('Deine Anfrage ist gespeichert und wartet auf Freigabe durch MO.');});};
