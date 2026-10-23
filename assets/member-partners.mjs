@@ -36,7 +36,7 @@ function render(){
       if(partner.category==='coffee'||partner.category==='carwash'){
         const link=el('a',partner.category==='coffee'?'Café-Angebote & Guthaben →':'Wasch-Angebote & Guthaben →','member-offers');link.href=partner.category==='coffee'?'cafe-kunden.html?firma='+encodeURIComponent(partner.id.replace(/^coffee__/,'')):'autowaschen-kunden.html';card.append(link);
       }
-      cards.append(card);
+      const offers=el('a','Abos ansehen →','member-offers');offers.href='partner-angebote.html?partner='+encodeURIComponent(partner.id);card.append(offers);cards.append(card);
     }
     panel.append(cards);section.append(panel);grid.append(section);
   }
