@@ -28,9 +28,10 @@ window.moStripeCheckout=async data=>{
  const user=auth.currentUser;if(!user?.emailVerified)throw Error('Bitte zuerst mit deinem bestätigten Kundenkonto anmelden.');
  const available=await getPaymentState(true),kind=data.catalogOfferId?'catalog':data.category;
  if(!canPurchase(available,kind))throw Error('Zahlungen werden für diesen Bereich noch vorbereitet.');
- if(data.category==='coffee'&&!data.catalogOfferId&&!coffeeCompany)throw Error('Bitte zuerst den gebuchten Café-Partner auswählen.');
+ const chosenCoffeeCompany=data.companyId||coffeeCompany;
+ if(data.category==='coffee'&&!data.catalogOfferId&&!/^[A-Za-z0-9_-]{1,100}$/.test(chosenCoffeeCompany||''))throw Error('Bitte zuerst deinen Café-Partner auswählen.');
  working=true;refreshControls();say(available.mode==='test'?'Stripe-Testzahlung wird geöffnet …':'Sicherer Stripe-Checkout wird geöffnet …');
- try{const result=(await httpsCallable(functions,'createStripeCheckout')({...data,...(data.category==='coffee'&&!data.catalogOfferId?{companyId:coffeeCompany}:{}),termsAccepted:true})).data;if(auth.currentUser?.uid!==user.uid)throw Error('Bitte erneut anmelden.');const url=new URL(result.url);if(url.origin!=='https://checkout.stripe.com'||url.username||url.password)throw Error('Ungültige Zahlungsadresse.');location.assign(url.href);}catch(e){say(failure(e));throw e;}finally{working=false;refreshControls();}
+ try{const result=(await httpsCallable(functions,'createStripeCheckout')({...data,...(data.category==='coffee'&&!data.catalogOfferId?{companyId:chosenCoffeeCompany}:{}),termsAccepted:true})).data;if(auth.currentUser?.uid!==user.uid)throw Error('Bitte erneut anmelden.');const url=new URL(result.url);if(url.origin!=='https://checkout.stripe.com'||url.username||url.password)throw Error('Ungültige Zahlungsadresse.');location.assign(url.href);}catch(e){say(failure(e));throw e;}finally{working=false;refreshControls();}
 };
 function bind(button,terms,plan){if(!button||!terms)return;controls.push({button,terms});terms.addEventListener('change',refreshControls);button.onclick=async()=>{if(button.disabled)return;try{await window.moStripeCheckout({category:'coffee',plan:typeof plan==='function'?plan():plan});}catch(e){say(failure(e));}};}
 for(const [buttonId,termsId,selector] of [['moStripePay','moStripeTerms','input[name="club-plan"]:checked'],['moStripeMemberPay','moStripeMemberTerms','#requestedPlan']])bind(document.getElementById(buttonId),document.getElementById(termsId),()=>document.querySelector(selector)?.value);
