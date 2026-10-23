@@ -73,4 +73,4 @@ function render(){if(protectedRoute(route)&&!signedIn){pendingRoute={...route};r
 if(memberView){try{const target=JSON.parse(new URLSearchParams(location.search).get('mo'));if(target&&['home','categories','world','partners','partner','apply'].includes(target.page))route=target}catch{}}root.querySelector('#mo-nav-logo').src=assets.brand;root.querySelectorAll('[data-mo-route]').forEach(b=>b.onclick=()=>navigate({page:b.dataset.moRoute}));const initialContent=view.innerHTML;try{render()}catch(error){view.innerHTML=initialContent;console.error("MO navigation:",error)};
 })();
 </script>
-</div><nav class="mo-legal-links" aria-label="Rechtliche Informationen"><a href="impressum.html">Impressum</a><a href="agb.html">Abo-Bedingungen</a><a href="datenschutz.html">Datenschutz</a></nav></body></html>
+</div><nav class="mo-legal-links" aria-label="Rechtliche Informationen"><a href="impressum.html">Impressum</a><a href="agb.html">Abo-Bedingungen</a><a href="datenschutz.html">Datenschutz</a></nav><nav class="mo-legal-links" aria-label="Kündigung"><a href="kuendigen.html">Verträge hier kündigen</a></nav></body></html>
