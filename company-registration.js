@@ -1,6 +1,6 @@
 
 (()=>{
-const companyRequestRecipient="tangosteakhouse1@web.de";
+const companyRequestRecipient="info@mosabo.de";
 const root=document.getElementById('mo-firm-email-preview');
 const form=root.querySelector('#mo-company-contact-form');
 const area=root.querySelector('#mo-company-world');
